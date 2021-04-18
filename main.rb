@@ -36,7 +36,7 @@ $axiom = l.iterate("L", 5).map{|e| e.to_sym }
 
 pngWorker = nil
 
-svgWorker = DataWorker.new("SVG   ", 10) do |data, wid|
+svgWorker = DataWorker.new("SVG   ", 32) do |data, wid|
   (t, id) = data
   id = sprintf("%04d", id)
   fname = "out/frame#{id}.svg"
@@ -147,7 +147,7 @@ pngWorker = DataWorker.new("   PNG", 16) do |data, wid|
 
   Log.("#{ofname}")
 
-  system("inkscape -z #{ifname} -e #{ofname} -w #{$w} -h #{$h} -b white", :out=>"/dev/null", :err=>"/dev/null")
+  system("inkscape #{ifname} -o #{ofname} -w #{$w} -h #{$h} -b white", :out=>"/dev/null", :err=>"/dev/null")
 end
 
 $w         = 500
