@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+require "open3"
+
 require_relative "lsystem.rb"
 require_relative "turtle.rb"
 require_relative "misc.rb"
@@ -8,10 +10,34 @@ include LSys
 include Turtles
 
 l = LSystem.new(
-  %w/L S R F [2 [M ] { } - + ^ $ @/,
+  # L: render a line.  expands to loss when iterated
+  # S: render a line.  does not expand
+  # R: move backwards one unit (Reverse)
+  # F: move Forwards one unit
+  # [2: divide the current unit length by 2
+  # [M: multiply the current unit length by 0.95 (Margin)
+  # ]: undo the most recent unit length change
+  # {: save the current turtle position
+  # }: restore the last saved turtle position
+  # -: rotate by -90 degrees
+  # +: rotate by 90 degrees
+  # (B: set color for the border
+  # (E: set color for Ethan
+  # (R: set color for receptionist
+  # (D: set color for doctor
+  # (L: set color for Lilah
+  # ): unset the last color
+  %w/L S R F [2 [M ] { } - + @ (B (E (R (D (L )/,
   {
-    "L" => "{S-@S+ [2 [2 F+F-][M @L] -F [2[2 R]+ @L -F+ [M @L] -[2 R]+] R [2 -[2 R]+ [M @L] -F [M @L] [2 R]] R [2[2 R]+ [M @L] -F+ [M @L] -[2 R]+]]}",
-    "@" => "",
+    # Expand the L symbol into loss
+    "L" => "{(B S-@S+) [2"\
+      "[2 F+F-][M (E @L)]"\
+      "-F [2  [2 R]+    (E @L)  -F+ [M (R @L)] -[2 R]+]"\
+      " R [2 -[2 R]+ [M (E @L)] -F  [M (L @L)]  [2 R] ]"\
+      " R [2  [2 R]+ [M (E @L)] -F+ [M (D @L)] -[2 R]+]"\
+    "]}",
+
+    "@" => "", # Collapse the leaf marker, for lines that are no longer leaves
   }
 )
 
@@ -70,6 +96,14 @@ end
 
 pngWorker = nil
 
+PALETTE = {
+  border: [0x00, 0x00, 0x00].freeze,
+  ethan:  [0x00, 0x38, 0x95].freeze,
+  rec:    [0xb4, 0x4b, 0xa0].freeze,
+  doc:    [0x7f, 0x8a, 0x93].freeze,
+  lilah:  [0x91, 0x9c, 0xbe].freeze,
+}.freeze
+
 svgWorker = DataWorker.new("SVG   ", 32) do |data, wid|
   (t, id) = data
   id = sprintf("%04d", id)
@@ -78,7 +112,7 @@ svgWorker = DataWorker.new("SVG   ", 32) do |data, wid|
   Log.("#{fname}")
 
   File.open(fname, "w") do |file|
-    path = ""
+    paths = {}
 
     def clip(n); n.abs < 1e5 end
     def zero(n); n.abs < 1e-5 end
@@ -96,35 +130,32 @@ svgWorker = DataWorker.new("SVG   ", 32) do |data, wid|
     s = TurtleStack.new(sx, sy, Math::PI * 0.5 + st) do |(fx, fy), (tx, ty), stroke|
       fy = -fy
       ty = -ty
-      path << "M#{fx},#{fy}" if path.empty?
-      path << "#{stroke ? "L" : "M"}#{tx},#{ty}"
+
+      if stroke
+        path = paths.fetch(stroke) { paths[stroke] = {path: "", tail: nil} }
+
+        if path[:tail].nil? || (path[:tail][0] - x).abs > 1e-5 || (path[:tail][1] - y).abs > 1e-5
+          path[:path] << "M#{fx},#{fy}"
+        end
+
+        path[:path] << "L#{tx},#{ty}"
+        path[:tail] = [tx, ty]
+      end
     end
 
     len = [sl]
+    clr = []
 
     leaf = false
 
     $axiom.each do |el|
       case el
         when :S, :L
-          s.push
-
           cl = len[-1] * (leaf ? tl : 1.0)
-          # cl = len[-1]
 
+          s.push
           s.move(cl * -0.5)
-          s.draw(cl)
-
-          # s.push
-          # s.rotd(135)
-          # s.draw(len[-1] * 0.15)
-          # s.pop
-
-          # s.push
-          # s.rotd(-133)
-          # s.draw(len[-1] * 0.15)
-          # s.pop
-
+          s.draw(cl, [clr[0], clr[1]].freeze)
           s.pop
 
           leaf = false
@@ -146,26 +177,51 @@ svgWorker = DataWorker.new("SVG   ", 32) do |data, wid|
           s.rotd(-90)
         when :+
           s.rotd(90)
-        when :"^"
-          s.rotd(-180 * 0.15)
-        when :"$"
-          s.rotd(180 * 0.15)
         when :"@"
           leaf = true
+        when :"(B"
+          clr << :border
+        when :"(E"
+          clr << :ethan
+        when :"(R"
+          clr << :rec
+        when :"(D"
+          clr << :doc
+        when :"(L"
+          clr << :lilah
+        when :")"
+          clr.pop
+        else
+          throw "didn't expect symbol #{el.inspect}"
       end
     end
 
-    view_box = "-0.5 -0.5 1 1"
-    file <<
-      "<svg xmlns=\"http://www.w3.org/2000/svg\" "\
-          "width=\"100%\" height=\"100%\" "\
-          "viewBox=\"#{view_box}\" "\
-          "preserveAspectRatio=\"xMidYMid meet\">\n"\
-      "  <path d=\"#{path}\" fill=\"none\" stroke=\"black\" stroke-width=\"0.003\" />\n"
+    body = paths.map do |((key, key2), data)|
+      path = data[:path]
 
-    file << "  <path d=\"#{$spiral}\" fill=\"none\" stroke=\"red\" stroke-width=\"0.003\" />\n" if $show_spiral
+      color = PALETTE[key]
 
-    file << "</svg>\n"
+      if key2
+        color = color.zip(PALETTE[key2]).map{|(a, b)| Integer(lerp(a.to_f, b.to_f, tl).round) }
+      end
+
+      color = "##{color.map{|c| "%02x" % c }.join}"
+
+      <<~EOF
+        <path d="#{path}" fill="none" stroke="#{color}" stroke-width="0.003" />
+      EOF
+    end.join
+
+    body << "  <path d=\"#{$spiral}\" fill=\"none\" stroke=\"red\" stroke-width=\"0.003\" />\n" if $show_spiral
+
+    file << <<~EOF
+      <svg xmlns="http://www.w3.org/2000/svg"
+           width="100%" height="100%"
+           viewBox="-0.5 -0.5 1 1"
+           preserveAspectRatio="xMidYMid meet">
+        #{body}
+      </svg>
+    EOF
   end
 
   pngWorker << [fname, "out/frame#{id}.png"]
@@ -176,11 +232,36 @@ pngWorker = DataWorker.new("   PNG", 16) do |data, wid|
 
   Log.("#{ofname}")
 
-  system("inkscape #{ifname} -o #{ofname} -w #{$w} -h #{$h} -b white", :out=>"/dev/null", :err=>"/dev/null")
+  Open3.popen3(*%W[inkscape #{ifname} -o #{ofname} -w #{$w} -h #{$h} -b white]) do |cin, cout, cerr, thr|
+    Thread.new(cerr) do |io|
+      Log.init("inkscape/STDERR")
+
+      begin
+        io.each_line do |line|
+          Log.(line.rstrip) if line =~ /\S/
+        end
+      rescue IOError
+      end
+    end
+
+    Thread.new(cout) do |io|
+      Log.init("inkscape/STDOUT")
+
+      begin
+        io.each_line do |line|
+          Log.(line.rstrip) if line =~ /\S/
+        end
+      rescue IOError
+      end
+    end
+
+    cin.close
+    thr.join
+  end
 end
 
-$w         = 720
-$h         = 720
+$w         = 1081
+$h         = 1081
 $framerate = 30
 $start_t   = 0
 $end_t     = 3

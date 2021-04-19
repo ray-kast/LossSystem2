@@ -28,8 +28,8 @@ module Turtles
 
     def rotd(angle) rotr(angle * Math::PI / 180) end
 
-    def move(dist) advance(dist, false) end
-    def draw(dist) advance(dist, true) end
+    def move(dist) advance(dist, nil) end
+    def draw(dist, inf = nil) advance(dist, inf || true) end
   end
 
   class TurtleStack
