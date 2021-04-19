@@ -17,22 +17,56 @@ l = LSystem.new(
 
 $axiom = l.iterate("L", 5).map{|e| e.to_sym }
 
-# $spiral = (0...100).step.map do |i|
-#   t = rlerp(0.0, 100.0, i)
+SPIRAL_CTR = begin
+  ox = 0.375
+  oy = -0.25
+  sf = 0.5 * 0.5 * 0.95
 
-#   a = 0.1
-#   b = 5.0
+  x = 0
+  y = 0
 
-#   r = a * b ** t
-#   Θ = t * Math::PI * 2.0
+  100.times do |n|
+    θ = n * (Math::PI / 2.0)
+    r = sf ** n
 
-#   x = r * Math::cos(Θ)
-#   y = r * Math::sin(Θ)
+    cos = Math::cos(θ)
+    sin = Math::sin(θ)
 
-#   "#{i == 0 ? "M" : "L"}#{x},#{y}"
-# end.join
+    x += r * (ox * cos + oy * sin)
+    y += r * (oy * cos - ox * sin)
+  end
 
-# p $spiral
+  [x, -y]
+end
+
+SPIRAL_R = Math::sqrt(SPIRAL_CTR[0] ** 2 + SPIRAL_CTR[1] ** 2)
+SPIRAL_Θ = Math::atan2(-SPIRAL_CTR[1], -SPIRAL_CTR[0])
+
+def spiral(t)
+  expon = 0.5 * 0.5 * 0.95
+
+  r = SPIRAL_R * expon ** t
+  θ = t * Math::PI / 2.0 + SPIRAL_Θ
+
+  (cx, cy) = SPIRAL_CTR
+  x = r * Math::cos(θ) + cx
+  y = r * Math::sin(θ) + cy
+
+  [x, y]
+end
+
+$show_spiral = false
+
+if $show_spiral
+  $nspiral = 100
+  $spiral = (0...$nspiral).step.map do |i|
+    t = lerp(0.0, 1.0, rlerp(0.0, $nspiral, i))
+
+    (x, y) = spiral(t)
+
+    "#{i == 0 ? "M" : "L"}#{x},#{y}"
+  end.join
+end
 
 pngWorker = nil
 
@@ -51,20 +85,13 @@ svgWorker = DataWorker.new("SVG   ", 32) do |data, wid|
 
     tl = rlerp($start_t, $end_t, t) # Time (interpolated)
 
-    sl = lerp(1.0, 4.0 / 0.95, tl) # Start length
+    sl = (4.0 / 0.95) ** tl # Start length
+    st = Math::PI / 2.0 * tl # Theta shift
 
-    sh_curve = -1.1
+    (tx, ty) = spiral(-tl)
 
-    sh = rlerp(Math::exp(0), Math::exp(sh_curve), Math::exp(tl * sh_curve)) # Shift factor
-
-    sx = sl * -0.375 * sh # X shift
-    sy = sl * 0.25 * sh # Y shift
-
-    st = Math::PI * 0.5 * tl # Theta shift
-    sc = Math::cos(-st) # Theta compensation (cos)
-    ss = Math::sin(-st) # Theta compensation (sin)
-
-    (sx, sy) = [sx * sc + sy * ss, sx * -ss + sy * sc] # Transform X and Y
+    sx = tx
+    sy = -ty
 
     s = TurtleStack.new(sx, sy, Math::PI * 0.5 + st) do |(fx, fy), (tx, ty), stroke|
       fy = -fy
@@ -129,14 +156,16 @@ svgWorker = DataWorker.new("SVG   ", 32) do |data, wid|
     end
 
     view_box = "-0.5 -0.5 1 1"
-    # "  <path d=\"#{$spiral}\" fill=\"none\" stroke=\"red\" stroke-width=\"0.003\" />\n"\
     file <<
       "<svg xmlns=\"http://www.w3.org/2000/svg\" "\
           "width=\"100%\" height=\"100%\" "\
           "viewBox=\"#{view_box}\" "\
           "preserveAspectRatio=\"xMidYMid meet\">\n"\
-      "  <path d=\"#{path}\" fill=\"none\" stroke=\"black\" stroke-width=\"0.003\" />\n"\
-      "</svg>\n"
+      "  <path d=\"#{path}\" fill=\"none\" stroke=\"black\" stroke-width=\"0.003\" />\n"
+
+    file << "  <path d=\"#{$spiral}\" fill=\"none\" stroke=\"red\" stroke-width=\"0.003\" />\n" if $show_spiral
+
+    file << "</svg>\n"
   end
 
   pngWorker << [fname, "out/frame#{id}.png"]
@@ -150,11 +179,11 @@ pngWorker = DataWorker.new("   PNG", 16) do |data, wid|
   system("inkscape #{ifname} -o #{ofname} -w #{$w} -h #{$h} -b white", :out=>"/dev/null", :err=>"/dev/null")
 end
 
-$w         = 500
-$h         = 500
+$w         = 720
+$h         = 720
 $framerate = 30
 $start_t   = 0
-$end_t     = 5
+$end_t     = 3
 
 File.open("out/framerate.txt", "w") {|f| f << $framerate }
 
