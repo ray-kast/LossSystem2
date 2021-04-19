@@ -260,8 +260,8 @@ pngWorker = DataWorker.new("   PNG", 16) do |data, wid|
   end
 end
 
-$w         = 1081
-$h         = 1081
+$w         = 1080
+$h         = 1080
 $framerate = 30
 $start_t   = 0
 $end_t     = 3
